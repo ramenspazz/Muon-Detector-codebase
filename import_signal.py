@@ -1,10 +1,6 @@
 
 ################################################
 ### Modified 12/24/2018, Dalton Tinoco
-### Original File Courtesy of MIT
-### Contact:
-### saxani@mit.edu: help with Original
-###
 ### Cosmic watch signal import script
 ###
 ### Entry point: import headers here
@@ -49,13 +45,6 @@ def DataCollection(ArduinoPort, fname, id, exitflag):
         write_to_file = " "
         counter = 0
 
-        #encode(encoding='utf-8', errors='strict')
-        write_to_file =  "###################################################################################\n"
-        write_to_file += "### CosmicWatch: The Desktop Muon Detector\n"
-        write_to_file += "### Questions? saxani@mit.edu\n"
-        write_to_file += "### Device ID: " + str(id) + "\n"
-        write_to_file += "### Comp_date Comp_time Event Ardn_time[ms] ADC_value[0-1023] SiPM[mV] Deadtime[ms]\n"
-        write_to_file += "###################################################################################\n"
         #file.write(str(datetime.now())+ " " + data)
         file.write(write_to_file.encode(encoding='utf-8', errors='strict'))
         write_to_file = ' '
