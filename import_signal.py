@@ -9,6 +9,7 @@
 ### import json : Unused
 ################################################
 import threading as TH        # For threading functionality for workers
+import msvcrt
 import serial
 import math
 import time
@@ -19,7 +20,10 @@ import logging
 import random
 
 import numpy as np
-import matplotlib.pyplot as plt
+import matplotlib
+matplotlib.use("TkAgg")
+import pylab
+pylab.ion()
     
 from datetime import datetime
 from multiprocessing import Process
@@ -33,36 +37,51 @@ from multiprocessing import Process
     ### removed signal handler, not nessecary for
     ### opening and closing files or opening COMS
     ################################################
-def DataCollection(ArduinoPort, fname, id, exitflag):
+def DataCollection(ArduinoPort, fname, id, exitflag, semi):
     try:
+
         ComPort = serial.Serial(port_list[int(ArduinoPort) - 1]) # open the COM Port
         ComPort.baudrate = 9600          # set Baud rate
         ComPort.bytesize = 8             # Number of data bits = 8
         ComPort.parity = 'N'           # No parity
         ComPort.stopbits = 1    
         print("Opening file...\n")
-        file = open(fname, "wb", 0)
-        write_to_file = " "
-        counter = 0
 
+        my_file = open(fname, "wb", 0)
+
+        counter = 0
         #file.write(str(datetime.now())+ " " + data)
-        file.write(write_to_file.encode(encoding='utf-8', errors='strict'))
+
+        write_to_file = "Detection start time: " + str(datetime.now()) + "\n"
+        my_file.write(write_to_file.encode())
         write_to_file = ' '
 
         while exitflag.locked():
             data = ComPort.readline()   # Wait and read data
             write_to_file = str(datetime.now()) + " : " + data.decode()
-            file.write(write_to_file.encode(encoding='utf-8', errors='strict'))
+            my_file.write(write_to_file.encode())
+            semi.acquire()
+            time.sleep(0.01)
+            semi.release()
 
         print("Shutting down open files and ports...\n")
         ComPort.close()     
-        file.close()
+        my_file.close()
         return True
     except Exception as e:
         print(e)
         print("An error occured... Beats me what it is but it sucks!")
     return True
     
+def detection(semis, exitflag):
+    print("starting detection...\n")
+    while exitflag.locked():
+        if not semis.acquire():
+            semis.release()
+            print("Detection!!!" + str(datetime.now()))
+        semis.release()
+        time.sleep(0.001)
+
 ################################################
 ### Thread Container Class
 ### Responsible for managing thread pool and
@@ -78,15 +97,22 @@ class ThreadContainer:
         self.threadpool = []
         self.FileNames = []
         self.lo = TH._allocate_lock()
+        self.sem = TH.Semaphore(2) 
 
     def start_threads(self, AvailablePorts, NamesList):
     # Starts worker threads to collect data
         self.lo.acquire(False)
+
         for i in range(0, len(AvailablePorts)):
             print("Starting thread, file: " + NamesList[i] + " Port: " + str(AvailablePorts[i]) + "\n")
-            t = TH.Thread(target=DataCollection, args=(AvailablePorts[i], NamesList[i], i, self.lo))
+            t = TH.Thread(target=DataCollection, args=(AvailablePorts[i], NamesList[i], i, self.lo, self.sem))
             self.threadpool.append(t)
             t.start()
+
+        t = TH.Thread(target=detection, args=(self.sem, self.lo))
+        self.threadpool.append(t)
+        t.start()
+
 
     def stop_workers(self):
         self.lo.release()
@@ -97,7 +123,7 @@ class sync_lock:
     def __enter__(self):
     # with constructor
         self.exitlock = TH.Lock()
-        print("\\nAquired Lock" + str(datetime.now()) + '\n')
+        print("\\nAcquired Lock" + str(datetime.now()) + '\n')
         return self.exitlock
 
     def __exit__(self, exc_type, exc_value, tb):
@@ -129,7 +155,6 @@ def serial_ports():
             result.append(port)
             print("Port " + str(i) + " Open\n")
         except (OSError, serial.SerialException):
-            #print(fuck)
             pass
         i += 1
     return result
@@ -142,6 +167,11 @@ def serial_ports():
 ###     is not recognized by your computer, make sure you haveinstalled the
 ###     drivers for the Arduino.
 ############################################
+x = np.linspace(0, 100, 100)
+y = np.linspace(0, 100, 100)
+matplotlib.pylab.scatter(x, y)
+matplotlib.pylab.show()
+
 collector = ThreadContainer()
 print('\n             Welcome to:   ')
 print('CosmicWatch: The Desktop Muon Detector\n')
@@ -169,9 +199,9 @@ print("Press q to stop: ")
 
 collector.start_threads(Port_Map, FileNameList)
 interupt_key = ' '
+
 while True: # keyboard driven inturrupt loop
     interupt_key = input()
-    # press 'q' to exit
     if interupt_key == 'q':
         print("shutting down detection")
         collector.stop_workers()
