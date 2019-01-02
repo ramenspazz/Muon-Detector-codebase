@@ -1,6 +1,6 @@
 
 ################################################
-### Modified 12/24/2018, Dalton Tinoco
+### Modified 1/1/2019, Dalton Tinoco
 ### Cosmic watch signal import script
 ###
 ### Entry point: import headers here
@@ -18,6 +18,7 @@ import sys
 import signal
 import logging
 import random
+import codecs
 
 import numpy as np
 import matplotlib
@@ -27,7 +28,7 @@ pylab.ion()
     
 from datetime import datetime
 from multiprocessing import Process
-    
+
     ################################################
     ### Data Collection Worker Function
     ### Responsible for reading signal data from a
@@ -47,21 +48,23 @@ def DataCollection(ArduinoPort, fname, id, exitflag, semi):
         ComPort.stopbits = 1    
         print("Opening file...\n")
 
-        my_file = open(fname, "wb", 0)
+        my_file = open(fname, mode='w', newline="\n")
+        #my_file = open(fname, "wb", 0)
 
         counter = 0
         #file.write(str(datetime.now())+ " " + data)
 
         write_to_file = "Detection start time: " + str(datetime.now()) + "\n"
-        my_file.write(write_to_file.encode())
+        print(write_to_file)
+        my_file.write(write_to_file)
         write_to_file = ' '
 
         while exitflag.locked():
-            data = ComPort.readline()   # Wait and read data
-            write_to_file = str(datetime.now()) + " : " + data.decode()
-            my_file.write(write_to_file.encode())
+            data = str((ComPort.readline()).decode())   # Wait and read data
+            write_to_file = str(datetime.now()) + " : " + data
+            my_file.write(write_to_file)
             semi.acquire()
-            time.sleep(0.01)
+            time.sleep(0.025)
             semi.release()
 
         print("Shutting down open files and ports...\n")
@@ -73,14 +76,18 @@ def DataCollection(ArduinoPort, fname, id, exitflag, semi):
         print("An error occured... Beats me what it is but it sucks!")
     return True
     
-def detection(semis, exitflag):
+def detection(semi, exitflag):
+    filename = "Detection_list.txt"
+    counter = 0
+    my_file = open(filename, mode='w')
     print("starting detection...\n")
     while exitflag.locked():
-        if not semis.acquire():
-            semis.release()
-            print("Detection!!!" + str(datetime.now()))
-        semis.release()
-        time.sleep(0.001)
+        if semi[0].locked() and semi[1].locked():
+            counter += 1
+            my_file.write(str(counter) + " " + str(datetime.now()))
+        time.sleep(0.00125)
+    my_file.close()
+
 
 ################################################
 ### Thread Container Class
@@ -97,19 +104,20 @@ class ThreadContainer:
         self.threadpool = []
         self.FileNames = []
         self.lo = TH._allocate_lock()
-        self.sem = TH.Semaphore(2) 
+        self.bank = []
 
     def start_threads(self, AvailablePorts, NamesList):
     # Starts worker threads to collect data
         self.lo.acquire(False)
-
+        for j in range(0, len(AvailablePorts)):
+            self.bank.append(TH._allocate_lock())
         for i in range(0, len(AvailablePorts)):
             print("Starting thread, file: " + NamesList[i] + " Port: " + str(AvailablePorts[i]) + "\n")
-            t = TH.Thread(target=DataCollection, args=(AvailablePorts[i], NamesList[i], i, self.lo, self.sem))
+            t = TH.Thread(target=DataCollection, args=(AvailablePorts[i], NamesList[i], i, self.lo, self.bank[i]))
             self.threadpool.append(t)
             t.start()
 
-        t = TH.Thread(target=detection, args=(self.sem, self.lo))
+        t = TH.Thread(target=detection, args=(self.bank, self.lo))
         self.threadpool.append(t)
         t.start()
 
@@ -167,10 +175,6 @@ def serial_ports():
 ###     is not recognized by your computer, make sure you haveinstalled the
 ###     drivers for the Arduino.
 ############################################
-x = np.linspace(0, 100, 100)
-y = np.linspace(0, 100, 100)
-matplotlib.pylab.scatter(x, y)
-matplotlib.pylab.show()
 
 collector = ThreadContainer()
 print('\n             Welcome to:   ')
@@ -186,19 +190,24 @@ if size_pl > 0:
         print('[' + str(i + 1) + '] ' + str(port_list[i]))
     print('[h] help\n')
     #PYTHON2.7 input -> raw_input
-    Port_Map = list(map(int, input("Select Arduino Ports, seperate with space (eg. 0 1):\n").split()))
+    print("Select Arduino Ports, seperate with space (eg. 0 1):\n")
+    Port_Map = list(map(int, input().split()))
 else :
     Port_Map = list(range(0,len(port_list))) # set default ports to comm1 and comm2
     print("The selected ports are:")
     for i in range(0,len(Port_Map)):
         print(str(Port_Map[i]) + ' ')
     print('\n')
-FileNameList = list(input("Enter file names seperated by a space (eg. <PATH>/test_sensor1.txt <PATH>/test_sensor2.txt)\n").split())
+print("Enter file names seperated by a space (eg. <PATH>/test_sensor1.txt <PATH>/test_sensor2.txt)\n")
+FileNameList = list(input().split())
 print("Taking data ...")
 print("Press q to stop: ")
 
 collector.start_threads(Port_Map, FileNameList)
 interupt_key = ' '
+
+x = np.linspace(0, 100, 100)
+y = np.linspace(0, 100, 100)
 
 while True: # keyboard driven inturrupt loop
     interupt_key = input()
@@ -206,3 +215,8 @@ while True: # keyboard driven inturrupt loop
         print("shutting down detection")
         collector.stop_workers()
         break
+    elif interupt_key == 's':
+        #This is a sample section to be used to display data in realtime
+        #TODO
+        matplotlib.pylab.scatter(x, y)
+        matplotlib.pylab.show()
