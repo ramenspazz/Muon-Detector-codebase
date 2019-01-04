@@ -1,6 +1,6 @@
 
 ################################################
-### Modified 1/1/2019, Dalton Tinoco
+### Modified 1/4/2019, Dalton Tinoco
 ### Cosmic watch signal import script
 ###
 ### Entry point: import headers here
