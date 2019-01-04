@@ -17,17 +17,35 @@ import glob
 import sys
 import signal
 import logging
-import random
 import codecs
-
 import numpy as np
 import matplotlib
+import array
+
 matplotlib.use("TkAgg")
 import pylab
 pylab.ion()
     
 from datetime import datetime
 from multiprocessing import Process
+
+MAX_ARRAY_SIZE = 25
+
+class ring_buffer:
+    def __init__(self):
+        self.data_buffer = array.array('f', np.zeros(MAX_ARRAY_SIZE))
+        self.cur_index = 0
+
+    def push_data(self, in_data):
+        if self.cur_index == 0: # if index position is at head, overwrite head
+            self.data_buffer[0] = in_data
+            self.cur_index += 1
+        elif self.cur_index < MAX_ARRAY_SIZE: # else if index position is between head and tail (inclusive)
+            self.data_buffer[self.cur_index] = in_data # write data to index position
+            if self.cur_index == (MAX_ARRAY_SIZE - 1): # if index position is tail, set index to head
+                self.cur_index = 0
+            else: # else increment by 1
+                self.cur_index += 1
 
     ################################################
     ### Data Collection Worker Function
@@ -40,7 +58,6 @@ from multiprocessing import Process
     ################################################
 def DataCollection(ArduinoPort, fname, id, exitflag, semi):
     try:
-
         ComPort = serial.Serial(port_list[int(ArduinoPort) - 1]) # open the COM Port
         ComPort.baudrate = 9600          # set Baud rate
         ComPort.bytesize = 8             # Number of data bits = 8
@@ -53,22 +70,30 @@ def DataCollection(ArduinoPort, fname, id, exitflag, semi):
 
         counter = 0
         #file.write(str(datetime.now())+ " " + data)
-
+        
         write_to_file = "Detection start time: " + str(datetime.now()) + "\n"
         print(write_to_file)
         my_file.write(write_to_file)
         write_to_file = ' '
-
-        while exitflag.locked():
-            data = str((ComPort.readline()).decode())   # Wait and read data
-            write_to_file = str(datetime.now()) + " : " + data
-            my_file.write(write_to_file)
-            semi.acquire()
-            time.sleep(0.025)
-            semi.release()
+        stats_buffer = ring_buffer()
+        x = np.linspace(1, 25, 25)
+        while True:
+            if exitflag.locked():
+                data = str((ComPort.readline()).decode())   # Wait and read data
+                write_to_file = str(datetime.now()) + " : " + data
+                my_file.write(write_to_file)
+                #add data to stats buffer
+                stats_buffer.push_data(float(data.split()[3]))
+                print("Mean: " + str(np.mean(stats_buffer.data_buffer)) + ", Std: " + str(np.std(stats_buffer.data_buffer)), end='\r')
+                semi.acquire()
+                time.sleep(0.025)
+                semi.release()
+            else:
+                break
 
         print("Shutting down open files and ports...\n")
         ComPort.close()     
+        #my_file.write("#") # end of file marker
         my_file.close()
         return True
     except Exception as e:
@@ -79,10 +104,15 @@ def DataCollection(ArduinoPort, fname, id, exitflag, semi):
 def detection(semi, exitflag):
     filename = "Detection_list.txt"
     counter = 0
-    my_file = open(filename, mode='w')
+    lock_counter = 0
+    my_file = open(filename, mode='w', newline="\n")
     print("starting detection...\n")
     while exitflag.locked():
-        if semi[0].locked() and semi[1].locked():
+        for s in semi:
+            if s.locked():
+                lock_counter += 1
+        lock_counter = 0
+        if lock_counter >= 2:
             counter += 1
             my_file.write(str(counter) + " " + str(datetime.now()))
         time.sleep(0.00125)
@@ -143,6 +173,7 @@ class sync_lock:
 ###    :raises EnvironmentError On unsupported or unknown platforms
 ###    :returns A list of the serial ports available on the system
 ################################################
+
 def serial_ports():
     if sys.platform.startswith('win'):
         ports = ['COM%s' % (i + 1) for i in range(256)]
@@ -174,7 +205,7 @@ def serial_ports():
 ###     If the Arduino
 ###     is not recognized by your computer, make sure you haveinstalled the
 ###     drivers for the Arduino.
-############################################
+###############################################
 
 collector = ThreadContainer()
 print('\n             Welcome to:   ')
@@ -216,7 +247,31 @@ while True: # keyboard driven inturrupt loop
         collector.stop_workers()
         break
     elif interupt_key == 's':
-        #This is a sample section to be used to display data in realtime
-        #TODO
         matplotlib.pylab.scatter(x, y)
         matplotlib.pylab.show()
+    else:
+        print("not a command.\n")
+        pass
+interupt_key = input("\n\nLoad file for plotting? y/n: ")
+if interupt_key == 'y':
+    f_line_in = " "
+    my_files = []
+    ln = 0
+    count = 0
+    data_buff = []
+    for fname in collector.FileNames:
+        data_buff.append(array.array('f'))
+        with open(fname, mode='r') as fp:
+            for f_line_in in enumerate(fp):
+                if ln == 0:
+                    ln += 1
+                    pass
+                else:
+                    data_buff[count].append(float(f_line_in.split()[6]))
+                count += 1
+        # display stats about files
+    for arr in data_buff:
+        dat_mean = str(np.mean(arr))
+        dat_stdd = str(np.std(arr))
+        print("Statisticts stuff:\n")
+        print("Mean = {}, Standard Deviation = {}\n\n".format(dat_mean, dat_stdd))
